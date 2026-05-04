@@ -5,7 +5,7 @@ Esta version mejora la experiencia de usuario con una interfaz mas moderna y est
 
 ## Mejoras implementadas
 
-### 1) Diseno visual y accesibilidad
+### 1) Diseño visual y accesibilidad
 - Integracion de FlatLaf (via `pom.xml`) y configuracion visual en `src/vista/theme/ThemeManager.java`.
 - Paleta UX aplicada:
   - Primary: `#0d6efd`
@@ -20,7 +20,7 @@ Esta version mejora la experiencia de usuario con una interfaz mas moderna y est
   - Valores estadisticos: 28 Bold
   - Inputs y tabla: 12-13
 
-### 2) Rediseno de interfaz (Layouts)
+### 2) Rediseño de interfaz (Layouts)
 - Pestaña `Contactos`:
   - `BorderLayout` principal.
   - Zona superior con `GridBagLayout` para formulario y filtros en dos filas.
@@ -71,7 +71,7 @@ javac -d .\out .\src\modelo\*.java .\src\controlador\*.java .\src\vista\*.java .
 java -cp .\out vista.ventana
 ```
 
-## Opcion con Maven (incluye FlatLaf)
+## Opcion con Maven (Configurada para futura migración) (incluye FlatLaf)
 ```powershell
 Set-Location "C:\Users\Freddy Potes\IdeaProjects\u1c5_AGC"
 mvn clean package

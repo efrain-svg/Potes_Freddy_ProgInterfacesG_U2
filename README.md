@@ -1,4 +1,4 @@
-# Aplicacion de Gestion de Contactos (Redisenada)
+# Aplicacion de Gestion de Contactos (Rediseñada)
 
 ## Objetivo
 Esta version mejora la experiencia de usuario con una interfaz mas moderna y estructurada, flujo de trabajo claro, eventos de productividad y soporte multilingue.

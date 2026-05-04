@@ -43,7 +43,7 @@ Esta version mejora la experiencia de usuario con una interfaz mas moderna y est
 
 ### 4) Soporte multilingue con ResourceBundle
 - Idiomas soportados:
-  1. Espanol
+  1. Español
   2. Ingles
   3. Portugues (pt-BR)
 - Recursos:

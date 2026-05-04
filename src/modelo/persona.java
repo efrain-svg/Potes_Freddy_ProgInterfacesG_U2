@@ -1,11 +1,14 @@
 package modelo;
 
+import java.time.LocalDate;
+
 // Definicion de la clase publica "persona"
 public class persona {
 
 	// Declaracion de variables privadas de la clase "persona"
 	private String nombre, telefono, email, categoria;
 	private boolean favorito;
+	private LocalDate fechaRegistro;
 
 	// Constructor publico de la clase "persona"
 	public persona() {
@@ -16,16 +19,22 @@ public class persona {
 		this.email = "";
 		this.categoria = "";
 		this.favorito = false;
+		this.fechaRegistro = LocalDate.now();
 	}
 
 	// Constructor publico de la clase "persona" que inicializa todos los campos
 	public persona(String nombre, String telefono, String email, String categoria, boolean favorito) {
+		this(nombre, telefono, email, categoria, favorito, LocalDate.now());
+	}
+
+	public persona(String nombre, String telefono, String email, String categoria, boolean favorito, LocalDate fechaRegistro) {
 		super();
 		this.nombre = limpiar(nombre);
 		this.telefono = limpiar(telefono);
 		this.email = limpiar(email);
 		this.categoria = limpiar(categoria);
 		this.favorito = favorito;
+		this.fechaRegistro = fechaRegistro == null ? LocalDate.now() : fechaRegistro;
 	}
 
 	private String limpiar(String valor) {
@@ -82,9 +91,17 @@ public class persona {
 		this.favorito = favorito;
 	}
 
+	public LocalDate getFechaRegistro() {
+		return fechaRegistro;
+	}
+
+	public void setFechaRegistro(LocalDate fechaRegistro) {
+		this.fechaRegistro = fechaRegistro == null ? LocalDate.now() : fechaRegistro;
+	}
+
 	// Metodo para proveer un formato para almacenar en un archivo
 	public String datosContacto() {
-		return String.format("%s;%s;%s;%s;%s", nombre, telefono, email, categoria, favorito);
+		return String.format("%s;%s;%s;%s;%s;%s", nombre, telefono, email, categoria, favorito, fechaRegistro);
 	}
 
 	// Metodo para proveer el formato de los campos que se van a imprimir en la lista
@@ -95,7 +112,7 @@ public class persona {
 
 	// Mapea el contacto para ser mostrado directamente en JTable.
 	public Object[] comoFilaTabla() {
-		return new Object[] { nombre, telefono, email, categoria, favorito ? "Si" : "No" };
+		return new Object[] { nombre, telefono, email, categoria, favorito ? "\u2605" : "\u2606" };
 	}
 
 }

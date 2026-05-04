@@ -6,6 +6,8 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -13,7 +15,9 @@ import java.util.List;
 // Definicion de la clase publica "personaDAO"
 public class personaDAO {
 
-	private static final String CABECERA = "NOMBRE;TELEFONO;EMAIL;CATEGORIA;FAVORITO";
+	private static final String CABECERA_NUEVA = "NOMBRE;TELEFONO;EMAIL;CATEGORIA;FAVORITO;FECHA_REGISTRO";
+	private static final String CABECERA_ANTERIOR = "NOMBRE;TELEFONO;EMAIL;CATEGORIA;FAVORITO";
+	private static final char SEPARADOR_EXPORTACION = ';';
 
 	// Declaracion de atributos privados de la clase "personaDAO"
 	private File archivo;
@@ -35,7 +39,7 @@ public class personaDAO {
 		if (!archivo.exists()) {
 			try {
 				archivo.createNewFile();
-				escribir(CABECERA);
+				escribir(CABECERA_NUEVA);
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -76,11 +80,13 @@ public class personaDAO {
 			if (contacto == null || contacto.trim().isEmpty()) {
 				continue;
 			}
-			if (CABECERA.equalsIgnoreCase(contacto.trim())) {
+
+			String registro = contacto.trim();
+			if (CABECERA_NUEVA.equalsIgnoreCase(registro) || CABECERA_ANTERIOR.equalsIgnoreCase(registro)) {
 				continue;
 			}
 
-			String[] columnas = contacto.split(";");
+			String[] columnas = registro.split(";");
 			if (columnas.length < 5) {
 				continue;
 			}
@@ -89,8 +95,19 @@ public class personaDAO {
 			p.setNombre(columnas[0]);
 			p.setTelefono(columnas[1]);
 			p.setEmail(columnas[2]);
-			p.setCategoria(columnas[3]);
+			p.setCategoria(normalizarCategoria(columnas[3]));
 			p.setFavorito(Boolean.parseBoolean(columnas[4]));
+
+			if (columnas.length >= 6) {
+				try {
+					p.setFechaRegistro(LocalDate.parse(columnas[5]));
+				} catch (DateTimeParseException ex) {
+					p.setFechaRegistro(LocalDate.now());
+				}
+			} else {
+				p.setFechaRegistro(LocalDate.now());
+			}
+
 			personas.add(p);
 		}
 
@@ -100,7 +117,7 @@ public class personaDAO {
 	// Metodo publico para guardar los contactos modificados o eliminados
 	public void actualizarContactos(List<persona> personas) throws IOException {
 		try (PrintWriter writer = new PrintWriter(archivo)) {
-			writer.println(CABECERA);
+			writer.println(CABECERA_NUEVA);
 			for (persona p : personas) {
 				writer.println(p.datosContacto());
 			}
@@ -108,30 +125,62 @@ public class personaDAO {
 	}
 
 	public void exportarCsv(File destino, List<persona> personas) throws IOException {
+		exportarCsv(destino, new String[] {
+			"nombre", "telefono", "email", "categoria", "favorito", "fecha_registro"
+		}, construirFilasPorDefecto(personas));
+	}
+
+	public void exportarCsv(File destino, String[] cabeceras, List<String[]> filas) throws IOException {
 		if (destino == null) {
 			throw new FileNotFoundException("No se especifico ruta de exportacion");
 		}
 
 		try (PrintWriter writer = new PrintWriter(destino)) {
-			writer.println("nombre,telefono,email,categoria,favorito");
-			for (persona p : personas) {
-				String[] cols = new String[] {
-					p.getNombre(),
-					p.getTelefono(),
-					p.getEmail(),
-					p.getCategoria(),
-					String.valueOf(p.isFavorito())
-				};
-				writer.println(armarLineaCsv(cols));
+			writer.println(armarLineaCsv(cabeceras));
+			for (String[] fila : filas) {
+				writer.println(armarLineaCsv(fila));
 			}
 		}
+	}
+
+	private List<String[]> construirFilasPorDefecto(List<persona> personas) {
+		List<String[]> filas = new ArrayList<String[]>();
+		for (persona p : personas) {
+			filas.add(new String[] {
+				p.getNombre(),
+				p.getTelefono(),
+				p.getEmail(),
+				p.getCategoria(),
+				String.valueOf(p.isFavorito()),
+				String.valueOf(p.getFechaRegistro())
+			});
+		}
+		return filas;
+	}
+
+	private String normalizarCategoria(String valor) {
+		if (valor == null) {
+			return "";
+		}
+
+		String limpio = valor.trim();
+		if ("FAMILY".equalsIgnoreCase(limpio) || "Familia".equalsIgnoreCase(limpio) || "Family".equalsIgnoreCase(limpio)) {
+			return "FAMILY";
+		}
+		if ("FRIENDS".equalsIgnoreCase(limpio) || "Amigos".equalsIgnoreCase(limpio) || "Friends".equalsIgnoreCase(limpio)) {
+			return "FRIENDS";
+		}
+		if ("WORK".equalsIgnoreCase(limpio) || "Trabajo".equalsIgnoreCase(limpio) || "Trabalho".equalsIgnoreCase(limpio)) {
+			return "WORK";
+		}
+		return limpio;
 	}
 
 	private String armarLineaCsv(String[] columnas) {
 		StringBuilder linea = new StringBuilder();
 		for (int i = 0; i < columnas.length; i++) {
 			if (i > 0) {
-				linea.append(",");
+				linea.append(SEPARADOR_EXPORTACION);
 			}
 			linea.append(escaparCsv(columnas[i]));
 		}
@@ -140,7 +189,7 @@ public class personaDAO {
 
 	private String escaparCsv(String valor) {
 		String limpio = valor == null ? "" : valor;
-		if (limpio.contains(",") || limpio.contains("\"") || limpio.contains("\n")) {
+		if (limpio.indexOf(SEPARADOR_EXPORTACION) >= 0 || limpio.contains("\"") || limpio.contains("\n")) {
 			limpio = limpio.replace("\"", "\"\"");
 			return "\"" + limpio + "\"";
 		}

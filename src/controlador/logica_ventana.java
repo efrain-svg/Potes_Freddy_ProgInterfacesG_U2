@@ -1,5 +1,7 @@
 package controlador;
 
+import java.awt.Component;
+import java.awt.FlowLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
@@ -9,6 +11,8 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.IOException;
+import java.text.MessageFormat;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -18,44 +22,69 @@ import javax.swing.ActionMap;
 import javax.swing.InputMap;
 import javax.swing.JComponent;
 import javax.swing.JFileChooser;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.KeyStroke;
+import javax.swing.JPanel;
 import javax.swing.RowFilter;
+import javax.swing.SwingConstants;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableRowSorter;
 
 import modelo.persona;
 import modelo.personaDAO;
 import vista.ventana;
+import vista.i18n.I18n;
+import vista.theme.SvgIconLoader;
+import vista.theme.ThemeManager;
 
 public class logica_ventana implements ActionListener, ListSelectionListener, ItemListener {
 
+    private static final String CAT_FAMILY = "FAMILY";
+    private static final String CAT_FRIENDS = "FRIENDS";
+    private static final String CAT_WORK = "WORK";
+
+    private static final int COL_NOMBRE = 0;
+    private static final int COL_TELEFONO = 1;
+    private static final int COL_EMAIL = 2;
+    private static final int COL_CATEGORIA = 3;
+    private static final int COL_FAV = 4;
+
     private final ventana delegado;
     private final personaDAO dao;
+    private final I18n i18n;
 
     private String nombres;
     private String email;
     private String telefono;
     private String categoria = "";
     private boolean favorito = false;
+    private boolean actualizandoCombos = false;
 
     private List<persona> contactos;
     private TableRowSorter<DefaultTableModel> sorter;
 
+    private final javax.swing.Icon iconStarOn = SvgIconLoader.load("star-filled.svg", 16, 16);
+    private final javax.swing.Icon iconStarOff = SvgIconLoader.load("star-outline.svg", 16, 16);
+
     public logica_ventana(ventana delegado) {
         this.delegado = delegado;
         this.dao = new personaDAO(new persona());
+        this.i18n = new I18n();
         this.contactos = new ArrayList<persona>();
 
         configurarEventos();
         configurarTablaYFiltro();
         configurarAtajos();
         configurarMenuContextual();
+        aplicarIdioma(I18n.LANG_ES);
         cargarContactosRegistrados();
     }
 
@@ -65,6 +94,8 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
         delegado.btn_modificar.addActionListener(this);
         delegado.btn_exportar.addActionListener(this);
         delegado.cmb_categoria.addItemListener(this);
+        delegado.cmb_filtro_categoria.addItemListener(this);
+        delegado.cmb_idioma.addItemListener(this);
         delegado.chb_favorito.addItemListener(this);
         delegado.tbl_contactos.getSelectionModel().addListSelectionListener(this);
 
@@ -77,6 +108,16 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
     private void configurarTablaYFiltro() {
         sorter = new TableRowSorter<DefaultTableModel>(delegado.modeloTabla);
         delegado.tbl_contactos.setRowSorter(sorter);
+
+        configurarColumnasTabla();
+
+        delegado.tbl_contactos.getTableHeader().setResizingAllowed(true);
+        delegado.tbl_contactos.setAutoResizeMode(javax.swing.JTable.AUTO_RESIZE_ALL_COLUMNS);
+        delegado.tbl_contactos.setRowHeight(34);
+        delegado.tbl_contactos.setShowHorizontalLines(false);
+        delegado.tbl_contactos.setShowVerticalLines(false);
+        delegado.tbl_contactos.setIntercellSpacing(new java.awt.Dimension(0, 8));
+        delegado.tbl_contactos.setRowMargin(0);
 
         delegado.txt_buscar.getDocument().addDocumentListener(new DocumentListener() {
             @Override
@@ -96,6 +137,30 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
         });
 
         delegado.tbl_contactos.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getButton() != MouseEvent.BUTTON1 || e.getClickCount() != 1) {
+                    return;
+                }
+
+                int fila = delegado.tbl_contactos.rowAtPoint(e.getPoint());
+                int col = delegado.tbl_contactos.columnAtPoint(e.getPoint());
+                if (fila < 0 || col < 0) {
+                    return;
+                }
+
+                delegado.tbl_contactos.setRowSelectionInterval(fila, fila);
+                if (col == COL_FAV) {
+                    alternarFavoritoSeleccionado();
+                    return;
+                }
+
+                // double-click anywhere on a row opens edit
+                if (e.getClickCount() == 2) {
+                    prepararEdicionSeleccionada();
+                }
+            }
+
             @Override
             public void mousePressed(MouseEvent e) {
                 mostrarMenuSiCorresponde(e);
@@ -172,7 +237,7 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
 
     private void cargarContactosRegistrados() {
         delegado.pgb_carga.setIndeterminate(true);
-        delegado.pgb_carga.setString("Cargando contactos...");
+        actualizarEstado(i18n.t("status.loading"));
 
         SwingWorker<List<persona>, Void> worker = new SwingWorker<List<persona>, Void>() {
             @Override
@@ -187,11 +252,11 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
                     refrescarTabla();
                     actualizarEstadisticas();
                 } catch (Exception e) {
-                    JOptionPane.showMessageDialog(delegado, "Problemas al cargar los contactos");
+                    JOptionPane.showMessageDialog(delegado, i18n.t("msg.loadError"));
                 } finally {
                     delegado.pgb_carga.setIndeterminate(false);
                     delegado.pgb_carga.setValue(100);
-                    delegado.pgb_carga.setString("Carga completada");
+                    actualizarEstado(MessageFormat.format(i18n.t("status.loaded"), contactos.size(), i18n.formatDate(LocalDate.now())));
                 }
             }
         };
@@ -203,36 +268,55 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
         DefaultTableModel model = delegado.modeloTabla;
         model.setRowCount(0);
         for (persona p : contactos) {
-            model.addRow(p.comoFilaTabla());
+            model.addRow(new Object[] {
+                p.getNombre(),
+                p.getTelefono(),
+                p.getEmail(),
+                categoriaLabelPorCodigo(p.getCategoria()),
+                Boolean.valueOf(p.isFavorito())
+            });
         }
         aplicarFiltro();
+        configurarColumnasTabla();
     }
 
     private void aplicarFiltro() {
         String texto = delegado.txt_buscar.getText() == null ? "" : delegado.txt_buscar.getText().trim();
-        if (texto.isEmpty()) {
-            sorter.setRowFilter(null);
-            return;
+        String codigoFiltroCategoria = obtenerCodigoCategoriaFiltro();
+
+        List<RowFilter<Object, Object>> filtros = new ArrayList<RowFilter<Object, Object>>();
+
+        if (!texto.isEmpty()) {
+            String patron = "(?i)" + Pattern.quote(texto);
+            filtros.add(RowFilter.regexFilter(patron, COL_NOMBRE, COL_TELEFONO, COL_EMAIL));
         }
 
-        String patron = "(?i)" + Pattern.quote(texto);
-        sorter.setRowFilter(RowFilter.regexFilter(patron, 0, 1, 2));
+        if (!codigoFiltroCategoria.isEmpty()) {
+            filtros.add(RowFilter.regexFilter("^" + Pattern.quote(categoriaLabelPorCodigo(codigoFiltroCategoria)) + "$", COL_CATEGORIA));
+        }
+
+        if (filtros.isEmpty()) {
+            sorter.setRowFilter(null);
+        } else {
+            sorter.setRowFilter(RowFilter.andFilter(filtros));
+        }
     }
 
     private void inicializacionCampos() {
         nombres = delegado.txt_nombres.getText() == null ? "" : delegado.txt_nombres.getText().trim();
         email = delegado.txt_email.getText() == null ? "" : delegado.txt_email.getText().trim();
         telefono = delegado.txt_telefono.getText() == null ? "" : delegado.txt_telefono.getText().trim();
+        categoria = obtenerCodigoCategoriaFormulario();
     }
 
     private boolean validarCampos() {
         if (nombres.isEmpty() || telefono.isEmpty() || email.isEmpty()) {
-            JOptionPane.showMessageDialog(delegado, "Todos los campos deben estar llenos");
+            JOptionPane.showMessageDialog(delegado, i18n.t("msg.fillAll"));
             return false;
         }
 
-        if (categoria == null || categoria.isEmpty() || "Elija una Categoria".equals(categoria)) {
-            JOptionPane.showMessageDialog(delegado, "Seleccione una categoria valida");
+        if (categoria == null || categoria.isEmpty()) {
+            JOptionPane.showMessageDialog(delegado, i18n.t("msg.selectCategory"));
             return false;
         }
         return true;
@@ -262,7 +346,7 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
         try {
             dao.actualizarContactos(contactos);
         } catch (IOException ex) {
-            JOptionPane.showMessageDialog(delegado, "No se pudo guardar en archivo");
+            JOptionPane.showMessageDialog(delegado, i18n.t("msg.saveError"));
         }
     }
 
@@ -278,13 +362,13 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
         refrescarTabla();
         actualizarEstadisticas();
         limpiarCampos();
-        JOptionPane.showMessageDialog(delegado, "Contacto registrado");
+        JOptionPane.showMessageDialog(delegado, i18n.t("msg.added"));
     }
 
     private void modificarContactoSeleccionado() {
         int index = obtenerIndiceModeloSeleccionado();
         if (index < 0) {
-            JOptionPane.showMessageDialog(delegado, "Seleccione un contacto para modificar");
+            JOptionPane.showMessageDialog(delegado, i18n.t("msg.selectToEdit"));
             return;
         }
 
@@ -303,20 +387,20 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
         guardarCambiosDisco();
         refrescarTabla();
         actualizarEstadisticas();
-        JOptionPane.showMessageDialog(delegado, "Contacto actualizado");
+        JOptionPane.showMessageDialog(delegado, i18n.t("msg.updated"));
     }
 
     private void eliminarSeleccionado() {
         int index = obtenerIndiceModeloSeleccionado();
         if (index < 0) {
-            JOptionPane.showMessageDialog(delegado, "Seleccione un contacto para eliminar");
+            JOptionPane.showMessageDialog(delegado, i18n.t("msg.selectToDelete"));
             return;
         }
 
         int confirmacion = JOptionPane.showConfirmDialog(
             delegado,
-            "Esta seguro de eliminar el contacto?",
-            "Confirmar",
+            i18n.t("msg.confirmDelete"),
+            i18n.t("msg.confirmTitle"),
             JOptionPane.YES_NO_OPTION
         );
 
@@ -334,7 +418,7 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
     private void alternarFavoritoSeleccionado() {
         int index = obtenerIndiceModeloSeleccionado();
         if (index < 0) {
-            JOptionPane.showMessageDialog(delegado, "Seleccione un contacto");
+            JOptionPane.showMessageDialog(delegado, i18n.t("msg.selectContact"));
             return;
         }
 
@@ -349,7 +433,7 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
     private void prepararEdicionSeleccionada() {
         int index = obtenerIndiceModeloSeleccionado();
         if (index < 0) {
-            JOptionPane.showMessageDialog(delegado, "Seleccione un contacto");
+            JOptionPane.showMessageDialog(delegado, i18n.t("msg.selectContact"));
             return;
         }
 
@@ -368,8 +452,8 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
 
     private void exportarCsv() {
         JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Guardar exportacion CSV");
-        chooser.setSelectedFile(new File("contactos_exportados.csv"));
+        chooser.setDialogTitle(i18n.t("msg.exportDialog"));
+        chooser.setSelectedFile(new File(i18n.t("csv.filename") + ".csv"));
 
         int opcion = chooser.showSaveDialog(delegado);
         if (opcion != JFileChooser.APPROVE_OPTION) {
@@ -377,14 +461,57 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
         }
 
         File destino = chooser.getSelectedFile();
+        if (!destino.getName().toLowerCase().endsWith(".csv")) {
+            destino = new File(destino.getParentFile(), destino.getName() + ".csv");
+        }
+
+        if (destino.exists()) {
+            int confirmacion = JOptionPane.showConfirmDialog(
+                delegado,
+                i18n.t("msg.overwriteQuestion"),
+                i18n.t("msg.confirmTitle"),
+                JOptionPane.YES_NO_OPTION
+            );
+            if (confirmacion != JOptionPane.YES_OPTION) {
+                return;
+            }
+        }
+
         List<persona> visibles = obtenerContactosVisibles();
 
         try {
-            dao.exportarCsv(destino, visibles);
-            JOptionPane.showMessageDialog(delegado, "CSV exportado: " + destino.getAbsolutePath());
+            dao.exportarCsv(destino, obtenerCabecerasCsv(), construirFilasCsv(visibles));
+            JOptionPane.showMessageDialog(delegado, MessageFormat.format(i18n.t("msg.exported"), destino.getAbsolutePath()));
         } catch (IOException ex) {
-            JOptionPane.showMessageDialog(delegado, "No se pudo exportar el archivo CSV");
+            JOptionPane.showMessageDialog(delegado, i18n.t("msg.exportError"));
         }
+    }
+
+    private String[] obtenerCabecerasCsv() {
+        return new String[] {
+            i18n.t("csv.header.name"),
+            i18n.t("csv.header.phone"),
+            i18n.t("csv.header.email"),
+            i18n.t("csv.header.category"),
+            i18n.t("csv.header.favorite"),
+            i18n.t("csv.header.date")
+        };
+    }
+
+    private List<String[]> construirFilasCsv(List<persona> personasVisibles) {
+        List<String[]> filas = new ArrayList<String[]>();
+        for (persona p : personasVisibles) {
+            String fecha = p.getFechaRegistro() == null ? "" : i18n.formatDate(p.getFechaRegistro());
+            filas.add(new String[] {
+                p.getNombre(),
+                p.getTelefono(),
+                p.getEmail(),
+                categoriaLabelPorCodigo(p.getCategoria()),
+                p.isFavorito() ? i18n.t("csv.value.yes") : i18n.t("csv.value.no"),
+                fecha
+            });
+        }
+        return filas;
     }
 
     private List<persona> obtenerContactosVisibles() {
@@ -408,35 +535,238 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
         delegado.txt_telefono.setText(p.getTelefono());
         delegado.txt_email.setText(p.getEmail());
         delegado.chb_favorito.setSelected(p.isFavorito());
-        delegado.cmb_categoria.setSelectedItem(p.getCategoria());
+        delegado.cmb_categoria.setSelectedIndex(indiceCategoriaFormulario(p.getCategoria()));
     }
 
     private void actualizarEstadisticas() {
         int total = contactos.size();
-        int favoritos = 0;
+        int favoritosCount = 0;
         int familia = 0;
         int amigos = 0;
         int trabajo = 0;
 
         for (persona p : contactos) {
             if (p.isFavorito()) {
-                favoritos++;
+                favoritosCount++;
             }
 
-            if ("Familia".equalsIgnoreCase(p.getCategoria())) {
+            if (CAT_FAMILY.equalsIgnoreCase(p.getCategoria())) {
                 familia++;
-            } else if ("Amigos".equalsIgnoreCase(p.getCategoria())) {
+            } else if (CAT_FRIENDS.equalsIgnoreCase(p.getCategoria())) {
                 amigos++;
-            } else if ("Trabajo".equalsIgnoreCase(p.getCategoria())) {
+            } else if (CAT_WORK.equalsIgnoreCase(p.getCategoria())) {
                 trabajo++;
             }
         }
 
         delegado.lbl_total.setText(String.valueOf(total));
-        delegado.lbl_favoritos.setText(String.valueOf(favoritos));
+        delegado.lbl_favoritos.setText(String.valueOf(favoritosCount));
         delegado.lbl_familia.setText(String.valueOf(familia));
         delegado.lbl_amigos.setText(String.valueOf(amigos));
         delegado.lbl_trabajo.setText(String.valueOf(trabajo));
+        delegado.lbl_actualizacion.setText(MessageFormat.format(i18n.t("stats.updated"), i18n.formatDate(LocalDate.now())));
+
+        int otros = Math.max(0, total - familia - amigos - trabajo);
+        actualizarGraficas(familia, amigos, trabajo, otros);
+    }
+
+    private void actualizarGraficas(int familia, int amigos, int trabajo, int otros) {
+        delegado.pnl_chart_barras.setChart(
+            i18n.t("stats.chart.categories"),
+            new String[] {
+                i18n.t("cat.family"),
+                i18n.t("cat.friends"),
+                i18n.t("cat.work"),
+                i18n.t("cat.other")
+            },
+            new int[] { familia, amigos, trabajo, otros }
+        );
+
+        delegado.pnl_chart_pastel.setChart(
+            i18n.t("stats.chart.distribution"),
+            new String[] {
+                i18n.t("cat.family"),
+                i18n.t("cat.friends"),
+                i18n.t("cat.work")
+            },
+            new int[] { familia, amigos, trabajo }
+        );
+    }
+
+    private void actualizarEstado(String texto) {
+        delegado.lbl_estado.setText("\u2022 " + texto);
+    }
+
+    private String obtenerCodigoCategoriaFormulario() {
+        int idx = delegado.cmb_categoria.getSelectedIndex();
+        if (idx == 1) {
+            return CAT_FAMILY;
+        }
+        if (idx == 2) {
+            return CAT_FRIENDS;
+        }
+        if (idx == 3) {
+            return CAT_WORK;
+        }
+        return "";
+    }
+
+    private String obtenerCodigoCategoriaFiltro() {
+        int idx = delegado.cmb_filtro_categoria.getSelectedIndex();
+        if (idx == 1) {
+            return CAT_FAMILY;
+        }
+        if (idx == 2) {
+            return CAT_FRIENDS;
+        }
+        if (idx == 3) {
+            return CAT_WORK;
+        }
+        return "";
+    }
+
+    private int indiceCategoriaFormulario(String codigo) {
+        if (CAT_FAMILY.equalsIgnoreCase(codigo)) {
+            return 1;
+        }
+        if (CAT_FRIENDS.equalsIgnoreCase(codigo)) {
+            return 2;
+        }
+        if (CAT_WORK.equalsIgnoreCase(codigo)) {
+            return 3;
+        }
+        return 0;
+    }
+
+    private String categoriaLabelPorCodigo(String codigo) {
+        if (CAT_FAMILY.equalsIgnoreCase(codigo)) {
+            return i18n.t("cat.family");
+        }
+        if (CAT_FRIENDS.equalsIgnoreCase(codigo)) {
+            return i18n.t("cat.friends");
+        }
+        if (CAT_WORK.equalsIgnoreCase(codigo)) {
+            return i18n.t("cat.work");
+        }
+        return i18n.t("cat.other");
+    }
+
+    private String obtenerCodigoIdiomaSeleccionado() {
+        Object selected = delegado.cmb_idioma.getSelectedItem();
+        if (selected == null) {
+            return I18n.LANG_ES;
+        }
+        String code = selected.toString().trim().toLowerCase();
+        if (I18n.LANG_EN.equals(code) || I18n.LANG_PT.equals(code)) {
+            return code;
+        }
+        return I18n.LANG_ES;
+    }
+
+    private void aplicarIdioma(String code) {
+        i18n.setLanguage(code);
+
+        delegado.setTitle(i18n.t("app.title"));
+        if (delegado.lbl_tab_contactos != null) {
+            delegado.lbl_tab_contactos.setText(i18n.t("header.config"));
+        }
+        if (delegado.lbl_tab_estadisticas != null) {
+            delegado.lbl_tab_estadisticas.setText(i18n.t("tab.stats"));
+        }
+        delegado.tabs.setTitleAt(0, i18n.t("tab.contacts"));
+        delegado.tabs.setTitleAt(1, i18n.t("tab.stats"));
+
+        delegado.lbl_nombre.setText(i18n.t("label.name"));
+        delegado.lbl_telefono.setText(i18n.t("label.phone"));
+        delegado.lbl_email.setText(i18n.t("label.email"));
+        delegado.lbl_categoria.setText(i18n.t("label.category"));
+        delegado.chb_favorito.setText(i18n.t("label.favorite"));
+        delegado.lbl_filtro.setText(i18n.t("label.search"));
+        delegado.lbl_categoria_filtro.setText(i18n.t("label.categoryFilter"));
+        delegado.lbl_idioma.setText(i18n.t("label.language"));
+        delegado.txt_buscar.setToolTipText(i18n.t("placeholder.search"));
+        delegado.txt_buscar.putClientProperty("JTextField.placeholderText", i18n.t("placeholder.search"));
+
+        delegado.btn_add.setText(i18n.t("button.add"));
+        delegado.btn_modificar.setText(i18n.t("button.update"));
+        delegado.btn_eliminar.setText(i18n.t("button.delete"));
+        delegado.btn_exportar.setText(i18n.t("button.export"));
+
+        delegado.mnu_editar.setText(i18n.t("menu.edit"));
+        delegado.mnu_eliminar.setText(i18n.t("menu.delete"));
+        delegado.mnu_favorito.setText(i18n.t("menu.favorite"));
+        delegado.mnu_exportar.setText(i18n.t("menu.exportVisible"));
+
+        delegado.modeloTabla.setColumnIdentifiers(new Object[] {
+            i18n.t("table.name"),
+            i18n.t("table.phone"),
+            i18n.t("table.email"),
+            i18n.t("table.category"),
+            i18n.t("table.favorite")
+        });
+        configurarColumnasTabla();
+
+        actualizandoCombos = true;
+        int idxCategoria = Math.max(0, delegado.cmb_categoria.getSelectedIndex());
+        int idxFiltro = Math.max(0, delegado.cmb_filtro_categoria.getSelectedIndex());
+
+        delegado.cmb_categoria.removeAllItems();
+        delegado.cmb_categoria.addItem(i18n.t("cat.choose"));
+        delegado.cmb_categoria.addItem(i18n.t("cat.family"));
+        delegado.cmb_categoria.addItem(i18n.t("cat.friends"));
+        delegado.cmb_categoria.addItem(i18n.t("cat.work"));
+
+        delegado.cmb_filtro_categoria.removeAllItems();
+        delegado.cmb_filtro_categoria.addItem(i18n.t("cat.all"));
+        delegado.cmb_filtro_categoria.addItem(i18n.t("cat.family"));
+        delegado.cmb_filtro_categoria.addItem(i18n.t("cat.friends"));
+        delegado.cmb_filtro_categoria.addItem(i18n.t("cat.work"));
+
+        delegado.cmb_categoria.setSelectedIndex(Math.min(idxCategoria, delegado.cmb_categoria.getItemCount() - 1));
+        delegado.cmb_filtro_categoria.setSelectedIndex(Math.min(idxFiltro, delegado.cmb_filtro_categoria.getItemCount() - 1));
+        actualizandoCombos = false;
+
+        delegado.ttl_total.setText(i18n.t("stats.total"));
+        delegado.ttl_favoritos.setText(i18n.t("stats.favorites"));
+        delegado.ttl_familia.setText(i18n.t("stats.family"));
+        delegado.ttl_amigos.setText(i18n.t("stats.friends"));
+        delegado.ttl_trabajo.setText(i18n.t("stats.work"));
+
+        refrescarTabla();
+        actualizarEstadisticas();
+        actualizarEstado(i18n.t("status.ready"));
+    }
+
+    private void configurarColumnasTabla() {
+        if (delegado.tbl_contactos.getColumnModel().getColumnCount() <= COL_FAV) {
+            return;
+        }
+
+        delegado.tbl_contactos.getColumnModel().getColumn(COL_NOMBRE).setPreferredWidth(180);
+        delegado.tbl_contactos.getColumnModel().getColumn(COL_TELEFONO).setPreferredWidth(120);
+        delegado.tbl_contactos.getColumnModel().getColumn(COL_EMAIL).setPreferredWidth(340);
+        delegado.tbl_contactos.getColumnModel().getColumn(COL_CATEGORIA).setPreferredWidth(120);
+        delegado.tbl_contactos.getColumnModel().getColumn(COL_FAV).setMinWidth(56);
+        delegado.tbl_contactos.getColumnModel().getColumn(COL_FAV).setMaxWidth(56);
+        // no actions column
+
+        delegado.tbl_contactos.getColumnModel().getColumn(COL_FAV).setCellRenderer(new DefaultTableCellRenderer() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public Component getTableCellRendererComponent(javax.swing.JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+                super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+                boolean fav = value instanceof Boolean ? ((Boolean) value).booleanValue() : false;
+                setHorizontalAlignment(SwingConstants.CENTER);
+                setIcon(fav ? iconStarOn : iconStarOff);
+                setText(getIcon() == null ? (fav ? i18n.t("csv.value.yes") : i18n.t("csv.value.no")) : "");
+                setOpaque(true);
+                setBackground(isSelected ? table.getSelectionBackground() : table.getBackground());
+                return this;
+            }
+        });
+
+        // actions column removed — editing/deleting handled via double-click and context menu
     }
 
     @Override
@@ -472,11 +802,22 @@ public class logica_ventana implements ActionListener, ListSelectionListener, It
 
     @Override
     public void itemStateChanged(ItemEvent e) {
-        if (e.getSource() == delegado.cmb_categoria) {
-            Object selected = delegado.cmb_categoria.getSelectedItem();
-            categoria = selected == null ? "" : selected.toString();
-        } else if (e.getSource() == delegado.chb_favorito) {
+        if (e.getSource() == delegado.chb_favorito) {
             favorito = delegado.chb_favorito.isSelected();
+            return;
+        }
+
+        if (e.getStateChange() != ItemEvent.SELECTED || actualizandoCombos) {
+            return;
+        }
+
+        if (e.getSource() == delegado.cmb_categoria) {
+            categoria = obtenerCodigoCategoriaFormulario();
+        } else if (e.getSource() == delegado.cmb_filtro_categoria) {
+            aplicarFiltro();
+        } else if (e.getSource() == delegado.cmb_idioma) {
+            aplicarIdioma(obtenerCodigoIdiomaSeleccionado());
         }
     }
 }
+
